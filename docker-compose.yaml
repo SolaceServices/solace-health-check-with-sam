@@ -1,6 +1,10 @@
 #version: '3.8'
 
 services:
+  #============================================================================
+  # REQUIRED CONTAINERS (Start by default)
+  #============================================================================
+
   #----------------------------------------------------
   # Solace Broker - Required for A2A
   #
@@ -44,7 +48,95 @@ services:
       start_period: 30s
 
   #----------------------------------------------------
-  # MySQL Database (Required for MySQL Agent)
+  # Solace Agent Mesh Main Agent with Orchestrator (depends on Solace)
+  #
+  orch-agent:
+    image: solace-agent-mesh-enterprise:1.0.37
+    container_name: orch-agent
+    platform: linux/amd64
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./config/orch-agent:/app/configs
+      - ./data/orch-agent:/app/data
+      - ./.env:/app/.env
+      - ./data/sam-artifacts:/tmp/samv2
+    networks:
+      - sam-network
+    ports:
+      - "0.0.0.0:8001:8001"
+    #command: ["run", "/app/configs"]
+    depends_on:
+      solace-broker:
+        condition: service_healthy
+    healthcheck:
+        test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/8001' || exit 1"]
+        interval: 10s
+        timeout: 5s
+        retries: 3
+        start_period: 30s
+
+  #----------------------------------------------------
+  # Solace Best Practices Analyzer (depends on Solace, orch-agent)
+  #
+  bpa-agent:
+    image: solace-agent-mesh-enterprise:1.0.37
+    container_name: bpa-agent
+    platform: linux/amd64
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./config/solace-bp-agent:/app/configs
+      - ./data/solace-bp-agent:/app/data
+      - ./.env:/app/.env
+      - ./data/sam-artifacts:/tmp/samv2
+    networks:
+      - sam-network
+    command: ["run", "/app/configs"]
+    depends_on:
+      solace-broker:
+        condition: service_healthy
+      orch-agent:
+        condition: service_healthy
+
+  #----------------------------------------------------
+  # MCP Agent - Solace Broker (depends on Solace, orch-agent)
+  #
+  mcp-agent:
+    image: solace-agent-mesh-enterprise:1.0.37
+    container_name: mcp-agent
+    platform: linux/amd64
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./config/solace-mcp-agent:/app/configs
+      - ./data/solace-mcp-agent:/app/data
+      - ./.env:/app/.env
+      - ./config/solace-mcp-agent/repos:/repos
+      - ./data/sam-artifacts:/tmp/samv2
+    networks:
+      - sam-network
+    environment:
+      - SOLACE_BROKER_MCP_SERVER_COMMAND=python /repos/solace-platform-mcp/solace-monitoring-mcp-server/solace_monitoring_mcp_server.py
+      - SOLACE_BROKER_MCP_SERVER_DESCRIPTION=Provides access to Solace PubSub+ broker management via SEMP v2 API
+      - SOLACE_SEMPV2_OPENAPI_SPEC=/repos/solace-platform-mcp/solace-monitoring-mcp-server/semp-v2-swagger-config.json
+      - SOLACE_SEMPV2_BASE_URL=http://solace-sam:8080
+      - SOLACE_SEMPV2_AUTH_METHOD=basic
+      - SOLACE_SEMPV2_USERNAME="admin"
+      - SOLACE_SEMPV2_PASSWORD="admin"
+    command: ["run", "/app/configs"]
+    depends_on:
+      solace-broker:
+        condition: service_healthy
+      orch-agent:
+        condition: service_healthy
+
+  #============================================================================
+  # OPTIONAL CONTAINERS (Start on demand with --profile optional)
+  #============================================================================
+
+  #----------------------------------------------------
+  # MySQL Database (Required for SQL Agent)
   #
   mysql-server:
     profiles: ["optional"]
@@ -133,36 +225,7 @@ services:
         condition: service_healthy
 
   #----------------------------------------------------
-  # Solace Agent Mesh Main Agent with Orchestrator (depends on Solace)
-  #
-  orch-agent:
-    image: solace-agent-mesh-enterprise:1.0.37
-    container_name: orch-agent
-    platform: linux/amd64
-    stdin_open: true
-    tty: true
-    volumes:
-      - ./config/orch-agent:/app/configs
-      - ./data/orch-agent:/app/data
-      - ./.env:/app/.env
-      - ./data/sam-artifacts:/tmp/samv2
-    networks:
-      - sam-network
-    ports:
-      - "0.0.0.0:8001:8001"
-    #command: ["run", "/app/configs"]
-    depends_on:
-      solace-broker:
-        condition: service_healthy
-    healthcheck:
-        test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/8001' || exit 1"]
-        interval: 10s
-        timeout: 5s
-        retries: 3
-        start_period: 30s
-
-  #----------------------------------------------------
-  # MySQL Agent (depends on Solace, MySQL, orch-agent)
+  # SQL Agent (depends on Solace, MySQL, orch-agent)
   #
   sql-agent:
     profiles: ["optional"]
@@ -183,62 +246,6 @@ services:
       solace-broker:
         condition: service_healthy
       mysql-server:
-        condition: service_healthy
-      orch-agent:
-        condition: service_healthy
-
-
-  #----------------------------------------------------
-  # Solace Best Practices Analyzer (depends on Solace, orch-agent)
-  #
-  bpa-agent:
-    image: solace-agent-mesh-enterprise:1.0.37
-    container_name: bpa-agent
-    platform: linux/amd64
-    stdin_open: true
-    tty: true
-    volumes:
-      - ./config/solace-bp-agent:/app/configs
-      - ./data/solace-bp-agent:/app/data
-      - ./.env:/app/.env
-      - ./data/sam-artifacts:/tmp/samv2
-    networks:
-      - sam-network
-    command: ["run", "/app/configs"]
-    depends_on:
-      solace-broker:
-        condition: service_healthy
-      orch-agent:
-        condition: service_healthy
-
-  #----------------------------------------------------
-  # MCP Agent - Solace Broker (depends on Solace, orch-agent)
-  #
-  mcp-agent:
-    image: solace-agent-mesh-enterprise:1.0.37
-    container_name: mcp-agent
-    platform: linux/amd64
-    stdin_open: true
-    tty: true
-    volumes:
-      - ./config/solace-mcp-agent:/app/configs
-      - ./data/solace-mcp-agent:/app/data
-      - ./.env:/app/.env
-      - ./config/solace-mcp-agent/repos:/repos
-      - ./data/sam-artifacts:/tmp/samv2
-    networks:
-      - sam-network
-    environment:
-      - SOLACE_BROKER_MCP_SERVER_COMMAND=python /repos/solace-platform-mcp/solace-monitoring-mcp-server/solace_monitoring_mcp_server.py
-      - SOLACE_BROKER_MCP_SERVER_DESCRIPTION=Provides access to Solace PubSub+ broker management via SEMP v2 API
-      - SOLACE_SEMPV2_OPENAPI_SPEC=/repos/solace-platform-mcp/solace-monitoring-mcp-server/semp-v2-swagger-config.json
-      - SOLACE_SEMPV2_BASE_URL=http://solace-sam:8080
-      - SOLACE_SEMPV2_AUTH_METHOD=basic
-      - SOLACE_SEMPV2_USERNAME="admin"
-      - SOLACE_SEMPV2_PASSWORD="admin"
-    command: ["run", "/app/configs"]
-    depends_on:
-      solace-broker:
         condition: service_healthy
       orch-agent:
         condition: service_healthy
