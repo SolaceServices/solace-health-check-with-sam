@@ -1,0 +1,32 @@
+# =============================================================================
+# SAM RAG Agent Dependencies
+# =============================================================================
+# These dependencies are installed inside the RAG agent Docker container.
+# This file is mounted and installed during container startup.
+# =============================================================================
+
+# Machine Learning
+scikit-learn>=1.3.0
+
+# NLP
+nltk>=3.8.0
+
+# LangChain Framework
+langchain>=0.1.0
+langchain-community>=0.0.10
+langchain-text-splitters>=0.0.1
+
+# Vector Database
+qdrant-client>=1.7.0
+
+# OpenAI Token Management
+tiktoken>=0.5.0
+
+# File System Monitoring
+watchdog>=3.0.0
+
+# Database ORM
+sqlalchemy>=2.0.0
+
+# Data Validation
+pydantic>=2.0.0

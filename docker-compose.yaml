@@ -1,0 +1,250 @@
+#version: '3.8'
+
+services:
+  #----------------------------------------------------
+  # Solace Broker - Required for A2A
+  #
+  solace-broker:
+    image: solace/solace-pubsub-standard:latest
+    container_name: solace-broker
+    hostname: solace-sam
+    environment:
+      - username_admin_globalaccesslevel=admin
+      - username_admin_password=admin
+      - system_scaling_maxconnectioncount=100
+    networks:
+      - sam-network
+    ports:
+      - "8080:8080"     # Web UI
+      - "55333:55555"   # SMF
+      - "8008:8008"     # Web Transport
+      - "1883:1883"     # MQTT
+      - "8000:8000"     # REST
+      - "5672:5672"     # AMQP
+      - "9000:9000"     # REST over TLS
+      - "55443:55443"   # SMF over TLS
+      - "5550:5550"     # Health check
+    volumes:
+      - ./data/solace-broker/config:/var/lib/solace/config
+      - ./data/solace-broker/spool:/var/lib/solace/spool
+      - ./data/solace-broker/logs:/var/lib/solace/logs
+      - ./config/solace-broker:/mnt/config
+    shm_size: 1g
+    ulimits:
+      core: -1
+      nofile:
+        soft: 1048576
+        hard: 1048576
+      memlock: -1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5550/health-check/guaranteed-active"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  #----------------------------------------------------
+  # MySQL Database (Required for MySQL Agent)
+  #
+  mysql-server:
+    profiles: ["optional"]
+    image: mysql:8.0
+    container_name: mysql-server
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: test-db
+      MYSQL_USER: user
+      MYSQL_PASSWORD: user123
+    networks:
+      - sam-network
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+      - ./config/mysql:/docker-entrypoint-initdb.d
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot123"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  #----------------------------------------------------
+  # Qdrant Vector Database (Required for RAG Agent)
+  #
+  qdrant:
+    profiles: ["optional"]
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    hostname: qdrant-sam
+    networks:
+      - sam-network
+    ports:
+      - "6333:6333"     # REST API
+      - "6334:6334"     # gRPC API
+    volumes:
+      - ./data/qdrant:/qdrant/storage
+      - ./config/qdrant:/qdrant/config
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__SERVICE__ENABLE_CORS=true
+      - QDRANT__TELEMETRY_DISABLED=true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/6333' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  #----------------------------------------------------
+  # RAG Agent - Solace Config Analyzer (depends on Solace, Qdrant, orch-agent)
+  #
+  rag-agent:
+    profiles: ["optional"]
+    image: solace-agent-mesh-enterprise:1.0.37
+    container_name: rag-agent
+    platform: linux/amd64
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./config/solace-rag-agent:/app/configs
+      - ./data/solace-rag-agent:/app/data
+      - ./data/solace-rag-agent/input:/app/input
+      - ./data/solace-rag-agent/sam_rag:/app/sam_rag
+      - ./config/solace-rag-agent/requirements.txt:/app/requirements.txt
+      - ./.env:/app/.env
+      - ./data/sam-artifacts:/tmp/samv2
+    networks:
+      - sam-network
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        pip install -q -r /app/requirements.txt && \
+        exec sam run /app/configs
+    depends_on:
+      solace-broker:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      orch-agent:
+        condition: service_healthy
+
+  #----------------------------------------------------
+  # Solace Agent Mesh Main Agent with Orchestrator (depends on Solace)
+  #
+  orch-agent:
+    image: solace-agent-mesh-enterprise:1.0.37
+    container_name: orch-agent
+    platform: linux/amd64
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./config/orch-agent:/app/configs
+      - ./data/orch-agent:/app/data
+      - ./.env:/app/.env
+      - ./data/sam-artifacts:/tmp/samv2
+    networks:
+      - sam-network
+    ports:
+      - "0.0.0.0:8001:8001"
+    #command: ["run", "/app/configs"]
+    depends_on:
+      solace-broker:
+        condition: service_healthy
+    healthcheck:
+        test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/8001' || exit 1"]
+        interval: 10s
+        timeout: 5s
+        retries: 3
+        start_period: 30s
+
+  #----------------------------------------------------
+  # MySQL Agent (depends on Solace, MySQL, orch-agent)
+  #
+  sql-agent:
+    profiles: ["optional"]
+    image: solace-agent-mesh-enterprise:1.0.37
+    container_name: sql-agent
+    platform: linux/amd64
+    stdin_open: true
+    tty: true
+    volumes:
+       - ./config/sql-agent:/app/configs
+       - ./data/sql-agent:/app/data
+       - ./.env:/app/.env
+       - ./data/sam-artifacts:/tmp/samv2
+    networks:
+       - sam-network
+    command: ["run", "/app/configs"]
+    depends_on:
+      solace-broker:
+        condition: service_healthy
+      mysql-server:
+        condition: service_healthy
+      orch-agent:
+        condition: service_healthy
+
+
+  #----------------------------------------------------
+  # Solace Best Practices Analyzer (depends on Solace, orch-agent)
+  #
+  bpa-agent:
+    image: solace-agent-mesh-enterprise:1.0.37
+    container_name: bpa-agent
+    platform: linux/amd64
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./config/solace-bp-agent:/app/configs
+      - ./data/solace-bp-agent:/app/data
+      - ./.env:/app/.env
+      - ./data/sam-artifacts:/tmp/samv2
+    networks:
+      - sam-network
+    command: ["run", "/app/configs"]
+    depends_on:
+      solace-broker:
+        condition: service_healthy
+      orch-agent:
+        condition: service_healthy
+
+  #----------------------------------------------------
+  # MCP Agent - Solace Broker (depends on Solace, orch-agent)
+  #
+  mcp-agent:
+    image: solace-agent-mesh-enterprise:1.0.37
+    container_name: mcp-agent
+    platform: linux/amd64
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./config/solace-mcp-agent:/app/configs
+      - ./data/solace-mcp-agent:/app/data
+      - ./.env:/app/.env
+      - ./config/solace-mcp-agent/repos:/repos
+      - ./data/sam-artifacts:/tmp/samv2
+    networks:
+      - sam-network
+    environment:
+      - SOLACE_BROKER_MCP_SERVER_COMMAND=python /repos/solace-platform-mcp/solace-monitoring-mcp-server/solace_monitoring_mcp_server.py
+      - SOLACE_BROKER_MCP_SERVER_DESCRIPTION=Provides access to Solace PubSub+ broker management via SEMP v2 API
+      - SOLACE_SEMPV2_OPENAPI_SPEC=/repos/solace-platform-mcp/solace-monitoring-mcp-server/semp-v2-swagger-config.json
+      - SOLACE_SEMPV2_BASE_URL=http://solace-sam:8080
+      - SOLACE_SEMPV2_AUTH_METHOD=basic
+      - SOLACE_SEMPV2_USERNAME="admin"
+      - SOLACE_SEMPV2_PASSWORD="admin"
+    command: ["run", "/app/configs"]
+    depends_on:
+      solace-broker:
+        condition: service_healthy
+      orch-agent:
+        condition: service_healthy
+
+
+
+networks:
+  sam-network:
+    external: true

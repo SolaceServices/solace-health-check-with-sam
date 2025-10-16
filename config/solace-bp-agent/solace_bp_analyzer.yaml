@@ -1,0 +1,95 @@
+# Solace Best Practices Analyzer Agent
+# Analyzes SEMP JSON outputs against best practice rules
+
+log:
+  stdout_log_level: INFO
+  log_file_level: DEBUG
+  log_file: solace-bp-analyzer.log
+
+# Include shared configuration
+!include shared_config.yaml
+
+apps:
+  - name: solace-bp-analyzer-app
+    app_module: solace_agent_mesh.agent.sac.app
+    broker:
+      <<: *broker_connection
+
+    app_config:
+      namespace: "${NAMESPACE}"
+      agent_name: "SolaceBPAnalyzer"
+      display_name: "Solace BPA Agent"
+      supports_streaming: true
+
+      model: *general_model
+
+      instruction: |
+        You are a Solace PubSub+ Best Practices Analyzer. Your job is to analyze Solace broker
+        configurations (provided as JSON files) and identify violations of best practices.
+
+        **How You Work:**
+        1. User provides SEMP JSON output (queue configurations, client configurations, etc.)
+        2. You read and parse the JSON data
+        3. You check each configuration item against best practice rules
+        4. You generate a formatted Markdown report with findings
+
+        **Best Practice Rules for Queues:**
+
+        1. **Owner**: Every queue should have an owner configured for accountability
+        2. **Dead Message Queue (DMQ)**: Queues should have DMQ configured to handle rejected messages
+        3. **Max Message Size**: Should be appropriate for payloads (default 10000000 is very high, typical is 1000-50000 bytes)
+        4. **Permissions**: Avoid overly permissive settings (all users with consume/delete/modify-topic)
+        5. **Max Bind Count**: Should be less than 1000 for most use cases
+        6. **Queue Naming**: Should be 5-50 characters, follow consistent naming conventions
+        7. **System Queues**: Ignore queues starting with "#" (system queues) or "DMQ"
+
+        **Response Style:**
+        - Be concise and direct
+        - Create a well-formatted Markdown report using create_text_artifact
+        - Structure: Executive Summary → Findings by Category → Detailed Recommendations
+        - Include severity levels: Critical, Warning, Info
+        - Return only a brief summary, not the full report
+
+        **Example Workflow:**
+        User: "Analyze this queue configuration" [uploads getMsgVpnQueues.json]
+        You:
+        1. Read the artifact using read_file tool
+        2. Parse the JSON to extract queue list
+        3. Check each queue against the 7 rules above
+        4. Generate Markdown report with create_text_artifact
+        5. Return: "Analysis complete. Found 2 critical issues, 5 warnings across 12 queues. See full report in artifact."
+
+      # Tools configuration
+      tools:
+        # Artifact management tools (for reading inputs and creating reports)
+        - tool_type: builtin-group
+          group_name: "artifact_management"
+
+      # Required services
+      session_service: *default_session_service
+      artifact_service: *default_artifact_service
+
+      # Agent Card for discovery
+      agent_card:
+        description: "Analyzes Solace broker configurations against best practices. Accepts SEMP JSON outputs and generates detailed reports."
+        defaultInputModes: ["text", "file"]
+        defaultOutputModes: ["text", "file"]
+        skills:
+          - id: "best_practices_analysis"
+            name: "Best Practices Analysis"
+            description: "Analyze queue, client, and ACL configurations against Solace best practices"
+          - id: "json_parsing"
+            name: "JSON Analysis"
+            description: "Parse and analyze SEMP v2 JSON outputs"
+          - id: "report_generation"
+            name: "Report Generation"
+            description: "Generate detailed Markdown reports with findings and recommendations"
+
+      agent_card_publishing:
+        interval_seconds: 30
+
+      agent_discovery:
+        enabled: true
+
+      inter_agent_communication:
+        allow_list: ["*"]

@@ -1,0 +1,322 @@
+# Solace RAG Agent Configuration
+# Analyzes Solace broker CLI configurations, diagnostics, and logs
+#
+# Plugin Metadata:
+# Name: sam-rag-solace
+# Description: RAG agent for analyzing Solace broker configurations and diagnostics
+# Author: Solace Best Practices Team
+
+log:
+  stdout_log_level: INFO
+  log_file_level: DEBUG
+  log_file: sam-rag-solace.log
+
+shared_config:
+  - broker_connection: &broker_connection
+      dev_mode: ${SOLACE_DEV_MODE, false}
+      broker_url: ${SOLACE_BROKER_URL, ws://localhost:8080}
+      broker_username: ${SOLACE_BROKER_USERNAME, default}
+      broker_password: ${SOLACE_BROKER_PASSWORD, default}
+      broker_vpn: ${SOLACE_BROKER_VPN, default}
+      temporary_queue: ${USE_TEMPORARY_QUEUES, true}
+
+  - models:
+    general: &general_model
+      model: ${LLM_SERVICE_GENERAL_MODEL_NAME}
+      api_base: ${LLM_SERVICE_ENDPOINT}
+      api_key: ${LLM_SERVICE_API_KEY}
+
+  - services:
+    session_service: &default_session_service
+      type: "memory"
+      default_behavior: "PERSISTENT"
+
+    artifact_service: &default_artifact_service
+      type: "filesystem"
+      base_path: "/tmp/a2a_solace_rag_artifacts"
+      artifact_scope: "app"
+
+apps:
+  - name: sam-rag-solace-app
+    app_module: solace_agent_mesh.agent.sac.app
+    broker:
+      <<: *broker_connection
+    app_config:
+      namespace: "${NAMESPACE}"
+      agent_name: "SolaceRagAgent"
+      display_name: "Solace RAG Agent"
+      supports_streaming: true
+
+      model: *general_model
+      instruction: |
+        You are a Solace broker configuration expert that analyzes CLI configurations, diagnostics, and event logs.
+
+        **CRITICAL: You MUST ALWAYS use the 'search_documents' tool for ANY question about configurations, queues, VPNs, or logs.**
+        You do NOT have direct access to configuration files. ALL information must be retrieved using search_documents.
+
+        Your expertise includes:
+        - Analyzing Solace CLI configurations (queues, VPNs, bridges, subscriptions)
+        - Identifying configuration best practices and anti-patterns
+        - Finding naming convention anomalies and inconsistencies
+        - Correlating configurations with diagnostics and event logs
+        - Providing recommendations for optimization and troubleshooting
+
+        When analyzing configurations:
+        1. **ALWAYS start by calling search_documents with a relevant query**
+        2. Preserve exact CLI syntax in your responses when showing configurations
+        3. Look for patterns across multiple queues/VPNs/endpoints
+        4. Identify outliers and unusual settings
+        5. Consider operational best practices (spool limits, access types, subscriptions)
+        6. Correlate issues mentioned in logs with configuration settings
+
+        Example workflow for "list queue names":
+        - Call search_documents(query="queue names", include_references=True)
+        - Parse the returned configuration snippets
+        - Extract and list all queue names found
+        - Provide the complete list to the user
+
+      # --- Configurable Agent Initialization & Cleanup ---
+      agent_init_function:
+        module: "sam_rag.lifecycle"
+        name: "initialize_rag_agent"
+        config:
+          scanner:
+            batch: true
+            use_memory_storage: true
+            sources:
+              - type: filesystem
+                directories:
+                  - "/app/input"  # Maps to data/rag/solace/input
+                filters:
+                  file_formats:
+                    - ".cli"      # Solace CLI configs
+                    - ".txt"      # Diagnostics
+                    - ".log"      # Event logs
+                    - ".json"     # JSON configs (if any)
+                  max_file_size: 51200  # 50MB for large CLI dumps
+                schedule:
+                  interval: 300 # Check for new files every 5 minutes
+
+          # Preprocessor configuration - Minimal processing to preserve CLI structure
+          preprocessor:
+            default_preprocessor:
+              type: text
+              params:
+                  lowercase: false           # Preserve case for pattern detection
+                  normalize_whitespace: true # Clean up spacing
+                  remove_stopwords: false    # Keep all CLI keywords
+                  remove_punctuation: false  # Keep CLI syntax
+                  remove_numbers: false      # Keep config values
+                  remove_non_ascii: false
+                  remove_urls: false
+                  remove_emails: false
+                  remove_html_tags: false
+
+            # Text file configurations (includes .txt, .cli, .log)
+            text:
+              type: text
+              params:
+                lowercase: false
+                normalize_whitespace: true
+                remove_stopwords: false
+                remove_punctuation: false
+                remove_numbers: false
+                remove_non_ascii: false
+                remove_urls: false
+                remove_emails: false
+                remove_html_tags: false
+
+            # Text/log file configurations
+            txt:
+              type: text
+              params:
+                lowercase: false
+                normalize_whitespace: true
+                remove_stopwords: false
+                remove_punctuation: false
+                remove_numbers: false
+                remove_non_ascii: false
+                remove_urls: false
+                remove_emails: false
+                remove_html_tags: false
+
+            log:
+              type: text
+              params:
+                lowercase: false
+                normalize_whitespace: true
+                remove_stopwords: false
+                remove_punctuation: false
+                remove_numbers: false
+                remove_non_ascii: false
+                remove_urls: false
+                remove_emails: false
+                remove_html_tags: false
+
+            # JSON configurations
+            json:
+              type: structured
+              params:
+                lowercase: false
+                normalize_whitespace: true
+                remove_stopwords: false
+                remove_punctuation: false
+                remove_numbers: false
+                remove_non_ascii: false
+                remove_urls: false
+                remove_emails: false
+                remove_html_tags: false
+
+          # Text splitter configuration - Optimized for CLI command blocks
+          splitter:
+            default_splitter:
+              type: character
+              params:
+                chunk_size: 1500      # Large chunks to preserve queue configs
+                chunk_overlap: 200    # Moderate overlap for context
+                separator: "\n"
+            splitters:
+              # Text files (default for .txt, .cli, .log, etc.)
+              text:
+                type: character
+                params:
+                  chunk_size: 1500    # Fit full queue/VPN configs
+                  chunk_overlap: 200
+                  separator: "\n"
+                  is_separator_regex: false
+                  keep_separator: true
+                  strip_whitespace: false  # Preserve indentation!
+
+              # Text/diagnostic files
+              txt:
+                type: character
+                params:
+                  chunk_size: 2048
+                  chunk_overlap: 300
+                  separator: "\n"
+                  is_separator_regex: false
+                  keep_separator: true
+                  strip_whitespace: false
+
+              # Log files - smaller chunks per log entry
+              log:
+                type: character
+                params:
+                  chunk_size: 800     # Fit related log entries
+                  chunk_overlap: 100
+                  separator: "\n"
+                  is_separator_regex: false
+                  keep_separator: true
+                  strip_whitespace: false
+
+              # JSON files
+              json:
+                type: recursive_json
+                params:
+                  chunk_size: 1000
+                  chunk_overlap: 100
+
+          # Embedding configuration
+          embedding:
+            embedder_type: "openai"
+            embedder_params:
+              model: "${OPENAI_EMBEDDING_MODEL}"
+              api_key: "${OPENAI_API_KEY}"
+              api_base: "${OPENAI_API_ENDPOINT}"
+              batch_size: 32
+            normalize_embeddings: true
+
+          # Vector DB - Using existing qdrant-sam container
+          vector_db:
+            db_type: "qdrant"
+            db_params:
+              url: "http://qdrant-sam:6333"
+              api_key: "${QDRANT_API_KEY, }"
+              collection_name: "solace_configs"
+              embedding_dimension: ${QDRANT_EMBEDDING_DIMENSION, 1536}
+
+          # LLM configuration
+          llm:
+            load_balancer:
+              - model_name: "gpt-4o"
+                litellm_params:
+                  model: openai/${OPENAI_MODEL_NAME}
+                  api_key: ${OPENAI_API_KEY}
+                  api_base: ${OPENAI_API_ENDPOINT}
+                  temperature: 0.01
+
+          # Retrieval configuration
+          retrieval:
+            top_k: 10  # Retrieve more chunks for comprehensive analysis
+
+      agent_cleanup_function:
+        module: "sam_rag.lifecycle"
+        name: "cleanup_rag_agent_resources"
+
+      # --- ADK Tools Configuration ---
+      tools:
+        - tool_type: python
+          component_module: "sam_rag.tools"
+          function_name: "ingest_document"
+          required_scopes: ["rag:ingest:write"]
+
+        - tool_type: python
+          component_module: "sam_rag.tools"
+          function_name: "search_documents"
+          required_scopes: ["rag:search:read"]
+
+      session_service: *default_session_service
+      artifact_service: *default_artifact_service
+
+      enable_builtin_artifact_tools:
+        enabled: true
+
+      # Agent Card for Discovery
+      agent_card:
+        description: "Expert Solace broker configuration analyzer. Analyzes CLI configs, diagnostics, and logs to identify best practices, anomalies, and optimization opportunities."
+        defaultInputModes: ["text", "file"]
+        defaultOutputModes: ["text", "file"]
+        skills:
+          - id: "config_analysis"
+            name: "Configuration Analysis"
+            description: "Analyze Solace CLI configurations for queues, VPNs, bridges, and other objects."
+            examples:
+              - "What percentage of queues have more than 2 subscriptions?"
+              - "Find queue names that don't follow naming conventions"
+              - "Show me queues with ingress shutdown"
+              - "Compare max-spool-usage across all queues"
+
+          - id: "pattern_detection"
+            name: "Pattern Detection"
+            description: "Identify naming patterns, configuration anomalies, and outliers."
+            examples:
+              - "Find queues with unusual configurations"
+              - "Which VPNs have non-standard settings?"
+              - "Identify queues with different naming patterns"
+
+          - id: "log_correlation"
+            name: "Log Correlation"
+            description: "Correlate event logs and diagnostics with configurations."
+            examples:
+              - "Show me errors related to queue Q1"
+              - "Find configuration issues mentioned in logs"
+              - "What configs are related to this error?"
+
+          - id: "best_practices"
+            name: "Best Practices Review"
+            description: "Review configurations against Solace best practices."
+            examples:
+              - "Review queue configurations for best practices"
+              - "Are there any anti-patterns in these configs?"
+              - "Suggest optimizations for these settings"
+
+      agent_card_publishing:
+        interval_seconds: 30
+
+      agent_discovery:
+        enabled: true
+
+      inter_agent_communication:
+        allow_list: ["*"]
+        deny_list: []
+        request_timeout_seconds: 120  # Longer timeout for analysis tasks

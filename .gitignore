@@ -1,0 +1,35 @@
+# Development Meta Files - Keep Local
+.dev/
+
+# Python Virtual Environment
+venv/
+env/
+.venv/
+
+# Data directories (if not already ignored)
+data/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+.tmp/
+

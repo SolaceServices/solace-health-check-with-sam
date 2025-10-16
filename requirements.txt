@@ -1,0 +1,63 @@
+# =============================================================================
+# Core Dependencies for Local Development and Testing
+# =============================================================================
+#
+# Note: Agent-specific dependencies are in their respective config directories:
+# - config/solace-rag-agent/requirements.txt (RAG agent dependencies)
+# - config/sql-agent/requirements.txt (SQL agent dependencies, if needed)
+# - etc.
+#
+# This file contains only the essentials for local development, testing,
+# and interaction with the containerized services.
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Development Tools
+# -----------------------------------------------------------------------------
+
+# Python development utilities
+pytest>=7.4.0                # Testing framework
+pytest-cov>=4.1.0            # Coverage reporting
+black>=23.0.0                # Code formatting
+flake8>=6.0.0                # Linting
+mypy>=1.5.0                  # Type checking
+
+# -----------------------------------------------------------------------------
+# API and Service Interaction
+# -----------------------------------------------------------------------------
+
+# HTTP client for testing endpoints
+requests>=2.31.0             # HTTP library for API testing
+python-dotenv>=1.0.0         # Load environment variables from .env file
+
+# -----------------------------------------------------------------------------
+# Optional: Add as Needed
+# -----------------------------------------------------------------------------
+
+# Uncomment if you need to interact with Solace broker locally:
+# solace-pubsub>=1.0.0        # Solace Python client
+
+# Uncomment if you need to interact with MySQL locally:
+# mysql-connector-python>=8.0.33
+# or
+# pymysql>=1.1.0
+
+# Uncomment if you need to interact with Qdrant locally:
+# qdrant-client>=1.7.0
+
+# Uncomment if you need OpenAI for local testing:
+# openai>=1.0.0
+
+# Uncomment if you need YAML processing:
+# PyYAML>=6.0.1
+
+# Uncomment if you need to work with data:
+# pandas>=2.0.0
+
+# =============================================================================
+# To install:
+#   1. Activate virtual environment: source venv/bin/activate
+#   2. Install dependencies: pip install -r requirements.txt
+#   3. Add more dependencies as needed for your specific use case
+# =============================================================================
