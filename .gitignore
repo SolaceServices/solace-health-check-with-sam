@@ -2,9 +2,9 @@
 .dev/
 
 # Python Virtual Environment
+.venv/
 venv/
 env/
-.venv/
 
 # Data directories (if not already ignored)
 data/
@@ -15,11 +15,13 @@ data/
 .env.*.local
 
 # IDE
-.vscode/
 .idea/
 *.swp
 *.swo
 *~
+
+# VSCode settings (optional - can be committed for team consistency)
+# .vscode/
 
 # OS files
 .DS_Store
