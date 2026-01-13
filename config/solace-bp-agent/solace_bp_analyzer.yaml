@@ -3,7 +3,7 @@
 
 log:
   stdout_log_level: INFO
-  log_file_level: DEBUG
+  log_file_level: INFO
   log_file: solace-bp-analyzer.log
 
 # Include shared configuration
